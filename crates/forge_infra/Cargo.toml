@@ -17,6 +17,7 @@ forge_services.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
+webpki-root-certs.workspace = true
 
 bstr.workspace = true
 bytes.workspace = true
@@ -41,7 +42,7 @@ diesel_migrations = "2.2.0"
 chrono = { version = "0.4", features = ["serde"] }
 cacache = { version = "13.1.0", features = ["tokio-runtime"], default-features = false }
 serde.workspace = true
-oauth2 = { version = "5.0", features = ["reqwest"] }
+oauth2 = { version = "5.0", default-features = false }
 serde_urlencoded = "0.7.1"
 base64.workspace = true
 http.workspace = true

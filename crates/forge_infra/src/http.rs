@@ -18,6 +18,19 @@ const VERSION: &str = match option_env!("APP_VERSION") {
     Some(v) => v,
 };
 
+/// Bundled Mozilla `webpki-root-certs` decoded into reqwest [`Certificate`]s.
+///
+/// Used with [`ClientBuilder::tls_certs_only`] — the upstream-recommended
+/// way to bypass reqwest 0.13's default `rustls-platform-verifier` path,
+/// which otherwise parses the OS trust store synchronously on every
+/// `Client::build()` and regresses cold-start latency by ~38 ms on Linux
+/// (e.g. `forge zsh rprompt`).
+fn webpki_root_certs() -> impl Iterator<Item = Certificate> {
+    webpki_root_certs::TLS_SERVER_ROOT_CERTS
+        .iter()
+        .filter_map(|der| Certificate::from_der(der.as_ref()).ok())
+}
+
 pub struct ForgeHttpInfra<F> {
     client: Client,
     debug_requests: Option<PathBuf>,
@@ -106,12 +119,13 @@ impl<F: forge_app::FileWriterInfra + 'static> ForgeHttpInfra<F> {
             client = client.max_tls_version(to_reqwest_tls(version));
         }
 
-        match http.tls_backend {
-            TlsBackend::Rustls => {
-                client = client.use_rustls_tls();
-            }
-            TlsBackend::Default => {}
-        }
+        // Bypass reqwest 0.13's default `rustls-platform-verifier` (and the
+        // OS trust-store load it performs on every `Client::build()`) by
+        // pinning the trust roots to the bundled Mozilla webpki set — the
+        // upstream-recommended replacement for the removed
+        // `rustls-tls-webpki-roots` feature. Both `Rustls` and `Default`
+        // backends use the same trust roots.
+        client = client.tls_certs_only(webpki_root_certs());
 
         Self {
             debug_requests: config.debug_requests,

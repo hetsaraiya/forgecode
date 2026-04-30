@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use anyhow::{Context, anyhow};
 use forge_app::{HttpResponse, NetFetchService, ResponseContext, is_binary_content_type};
 use reqwest::{Client, Url};
@@ -10,27 +12,31 @@ use reqwest::{Client, Url};
 /// requiring authentication. Respects robots.txt and may be blocked by
 /// anti-scraping measures. For large pages, returns the first 40,000 characters
 /// and stores the complete content in a temporary file for subsequent access.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ForgeFetch {
-    client: Client,
-}
-
-impl Default for ForgeFetch {
-    fn default() -> Self {
-        Self::new()
-    }
+    client: OnceLock<Client>,
 }
 
 impl ForgeFetch {
     pub fn new() -> Self {
-        Self { client: Client::new() }
+        Self::default()
+    }
+
+    /// Returns a lazily-built [`reqwest::Client`].
+    ///
+    /// Defers `Client::build()` (which on `reqwest 0.13` synchronously loads
+    /// the OS trust store via `rustls-platform-verifier`) off the startup
+    /// path, so initializing `ForgeFetch` does not regress cold-start latency
+    /// (e.g. `forge zsh rprompt`).
+    fn client(&self) -> &Client {
+        self.client.get_or_init(Client::new)
     }
 }
 
 impl ForgeFetch {
     async fn check_robots_txt(&self, url: &Url) -> anyhow::Result<()> {
         let robots_url = format!("{}://{}/robots.txt", url.scheme(), url.authority());
-        let robots_response = self.client.get(&robots_url).send().await;
+        let robots_response = self.client().get(&robots_url).send().await;
 
         if let Ok(robots) = robots_response
             && robots.status().is_success()
@@ -65,7 +71,7 @@ impl ForgeFetch {
         self.check_robots_txt(url).await?;
 
         let response = self
-            .client
+            .client()
             .get(url.as_str())
             .send()
             .await
